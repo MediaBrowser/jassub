@@ -250,7 +250,86 @@ self.freeTrack = () => {
  * @param {!string} url the URL of the subtitle file.
  */
 self.setTrackByUrl = ({ url }) => {
-  self.setTrack({ content: read_(url) })
+
+ // fallback to reading the entire file if required apis don't exist
+  if (typeof TextDecoderStream !== 'function') {
+    return self.setTrack({ content: read_(url) });
+  }
+
+  let process = line => {
+    if (dropAllBlur) line = dropBlur(line)
+    jassubObj.processLine(line);
+  };
+
+  if (availableFonts) {
+    const original = process;
+    let fontnameIndex;
+
+    process = line => {
+       // Ignore empty lines and comments
+      if (!line || line.startsWith(';')) {
+        return original(line);
+      }
+
+      if (line.startsWith('[')) {
+        fontnameIndex = undefined;
+        return original(line);
+      }
+
+      const verb = line.split(':')[0];
+
+      if (verb === 'Format') {
+        fontnameIndex = line.split(',').findIndex(s => s.trim() === 'Fontname');
+      } else if (verb === 'Style') {
+        let font = line.split(',')[fontnameIndex].trim();
+
+        if (font) {
+          findAvailableFonts(font);
+        }
+      }
+
+      const regex = /\\fn([^\\}]*?)[\\}]/g;
+      let matches;
+      while ((matches = regex.exec(line)) !== null) {
+        findAvailableFonts(matches[1])
+      }
+
+      return original(line);
+    };
+  }
+
+  _fetch(url).then(response => {
+    let partialLine = '';
+
+    return response.body
+      .pipeThrough(new TextDecoderStream())
+      .pipeTo(new WritableStream({
+        start: () => {
+          jassubObj.newEmptyTrack();
+          subtitleColorSpace = libassYCbCrMap[jassubObj.trackColorSpace];
+          postMessage({ target: 'verifyColorSpace', subtitleColorSpace });
+        },
+        write: (chunk) => {
+          // Extract lines from chunk
+          const lines = (partialLine + chunk).split(/\r\n|[\r\n]/g);
+
+          // Save last line, as it might be incomplete
+          partialLine = lines.pop() || '';
+
+          // Process each complete line
+          for (const line of lines) {
+            process(line);
+          }
+        },
+        close: () => {
+          // Process the last partial line, if any
+          if (partialLine) {
+            process(partialLine);
+          }
+        }
+      }));
+  });
+
 }
 
 const getCurrentTime = () => {
@@ -570,15 +649,23 @@ self.init = data => {
 
     if (fallbackFont) findAvailableFonts(fallbackFont)
 
+    /*
     let subContent = data.subContent
     if (!subContent) subContent = read_(data.subUrl)
 
     processAvailableFonts(subContent)
     if (dropAllBlur) subContent = dropBlur(subContent)
+    */
 
     for (const font of data.fonts || []) asyncWrite(font)
 
-    jassubObj.createTrackMem(subContent)
+    //jassubObj.createTrackMem(subContent)
+
+    if (data.subContent) {
+      self.setTrack({ content: data.subContent });
+    } else {
+      self.setTrackByUrl({ url: data.subUrl });
+    }
 
     subtitleColorSpace = libassYCbCrMap[jassubObj.trackColorSpace]
 

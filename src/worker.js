@@ -163,6 +163,8 @@ let debug
 self.width = 0
 self.height = 0
 
+self.streamingTrackAbortController = null;
+
 let asyncRender = false
 
 self.addFont = ({ font }) => asyncWrite(font)
@@ -251,7 +253,7 @@ self.freeTrack = () => {
  */
 self.setTrackByUrl = ({ url }) => {
 
- // fallback to reading the entire file if required apis don't exist
+  // fallback to reading the entire file if required apis don't exist
   if (typeof TextDecoderStream !== 'function') {
     return self.setTrack({ content: read_(url) });
   }
@@ -298,38 +300,50 @@ self.setTrackByUrl = ({ url }) => {
     };
   }
 
-  _fetch(url).then(response => {
+  if (self.streamingTrackAbortController) {
+    self.streamingTrackAbortController.abort();
+  }
+
+  self.streamingTrackAbortController = new AbortController();
+  const signal = self.streamingTrackAbortController.signal;
+
+  _fetch(url).then(async response => {
+    const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+    
+    jassubObj.newEmptyTrack();
+    subtitleColorSpace = libassYCbCrMap[jassubObj.trackColorSpace];
+    postMessage({ target: 'verifyColorSpace', subtitleColorSpace });
+
     let partialLine = '';
+    while (true) {
 
-    return response.body
-      .pipeThrough(new TextDecoderStream())
-      .pipeTo(new WritableStream({
-        start: () => {
-          jassubObj.newEmptyTrack();
-          subtitleColorSpace = libassYCbCrMap[jassubObj.trackColorSpace];
-          postMessage({ target: 'verifyColorSpace', subtitleColorSpace });
-        },
-        write: (chunk) => {
-          // Extract lines from chunk
-          const lines = (partialLine + chunk).split(/\r\n|[\r\n]/g);
+        if (signal.aborted) { return; }
 
-          // Save last line, as it might be incomplete
-          partialLine = lines.pop() || '';
+        const {value, done} = await reader.read();
+        if (done) { break; }
 
-          // Process each complete line
-          for (const line of lines) {
+        const lines = value.split(/\r\n|[\r\n]/g);
+        
+        partialLine = lines[lines.length-1];
+        
+        for (const line of lines.slice(0, -1)) {
             process(line);
-          }
-        },
-        close: () => {
-          // Process the last partial line, if any
-          if (partialLine) {
-            process(partialLine);
-          }
         }
-      }));
+    }
+
+    process(partialLine);
+    
+  }).finally(() => {
+    self.streamingTrackAbortController = null;
   });
 
+}
+
+self.abortStreamingTrack =  () => {
+    if (self.streamingTrackAbortController) {
+        self.streamingTrackAbortController.abort();
+        self.streamingTrackAbortController = null;
+    }
 }
 
 const getCurrentTime = () => {
@@ -711,6 +725,7 @@ self.video = ({ currentTime, isPaused, rate }) => {
 }
 
 self.destroy = () => {
+  self.abortStreamingTrack();
   jassubObj.quitLibrary()
 }
 

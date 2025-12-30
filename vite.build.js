@@ -12,7 +12,7 @@ await build({
   build: {
     target: 'esnext',
     emptyOutDir: false,
-    minify: 'esbuild',
+    minify: false, //'esbuild',
     lib: {
       entry: resolve(__dirname, 'src/jassub.js'),
       name: 'JASSUB',
@@ -45,7 +45,7 @@ await build({
   build: {
     target: 'esnext',
     outDir: './dist',
-    minify: 'esbuild',
+    minify: false, //'esbuild',
     lib: {
       fileName: () => 'jassub-worker.js',
       entry: 'src/worker.js',
@@ -67,7 +67,7 @@ await build({
     },
     target: 'esnext',
     outDir: './dist',
-    minify: 'terser',
+    minify: false, //'terser',
     rollupOptions: {
       treeshake: false,
       output: {

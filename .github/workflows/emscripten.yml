@@ -39,28 +39,3 @@ jobs:
         name: js
         path: dist
 
-
-  update_gh-pages:
-    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-
-      - name: Download nightly build
-        uses: actions/download-artifact@v4
-        with:
-          name: js
-          path: jassub/assets
-
-      - name: Push new version
-        run: |
-          git config --global user.email "actions@noreply.github.com"
-          git config --global user.name "GitHub Action"
-          git add jassub/assets
-          git commit -m "$(printf \
-            "Update binaries to latest nightly\n\nFrom %s" "${{ github.sha }}")"
-          git push origin gh-pages
